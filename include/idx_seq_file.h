@@ -5,7 +5,7 @@
 #include <record.h>
 
 #define ALPHA 0.5
-#define RECORDS_PER_PAGE 10 
+#define RECORDS_PER_PAGE 4 
 #define PAGESIZE (RECORDS_PER_PAGE * RECORD_SIZE)
 #define MAX_PRIMARY_AREA_SIZE 10
 #define MAX_OVERFLOW_AREA_SIZE (MAX_PRIMARY_AREA_SIZE / 5)
@@ -50,6 +50,8 @@ int add_record(struct idx_seq_file *file, struct record *r);
  * \return 0 on success
 */
 int get_record(struct idx_seq_file *file, int32_t key, struct record *r);
+
+void print_data_file(struct idx_seq_file *file);
 
 /*
 int delete_record(struct idx_seq_file *file, int32_t key);
