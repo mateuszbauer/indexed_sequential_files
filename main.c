@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <record.h>
 #include <idx_seq_file.h>
+#include <assert.h>
 
 #define NUM_REC 7
 
@@ -27,6 +28,11 @@ int main () {
 	print_data_file(&file);
 
 
+	struct record ret = {};
+	int32_t klucz = 8;
+
+	assert (get_record(&file, klucz, &ret) == 0);
+	record_print(&ret);
 
 
 	return 0;

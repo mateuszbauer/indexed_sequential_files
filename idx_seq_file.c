@@ -7,11 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int my_fwrite(const char *filename)
-{
-    FILE *fp = fopen(filename, "rb");
-}
-
 static size_t get_file_size(const char *filename)
 {
     assert(filename != NULL);
@@ -434,7 +429,7 @@ void print_data_file(struct idx_seq_file *file)
         for (size_t i = 0; i < RECORD_LEN; i++) {
             printf("%hu ", rec.numbers[i]);
         }
-        if (rec.overflow_pointer == OVERFLOW_PTR_NULL) {
+        if (rec.overflow_pointer == OVERFLOW_PTR_NULL || rec.overflow_pointer == 0) {
             printf("| %x\n", rec.overflow_pointer);
         } else {
             printf("| %x (ovf_idx:%u)\n", rec.overflow_pointer, _ovf_ptr_translate(file, rec.overflow_pointer));
@@ -447,4 +442,68 @@ void print_data_file(struct idx_seq_file *file)
     }
 
     fclose(fp);
+}
+
+int get_record(struct idx_seq_file *file, int32_t key, struct record *r)
+{
+    if (file == NULL) {
+        fprintf(stderr, "file is NULL\n");
+        return -EINVAL;
+    }
+
+    if (r == NULL) {
+        fprintf(stderr, "record is NULL\n");
+        return -EINVAL;
+    }
+
+    if (key <= 1) {
+        fprintf(stderr, "Invalid key: %d\n", key);
+        return -EINVAL;
+    }
+
+    uint16_t page_number = get_page_number_from_index_file(file, key);
+    
+    struct record page[RECORDS_PER_PAGE];
+    read_page_from_data_file(file, page, page_number);
+
+    size_t idx = 0;
+    bool found = false;
+    for (size_t i = 0; i < RECORDS_PER_PAGE; i++) {
+        if (page[i].key == key) {
+            memcpy(r, &page[i], RECORD_SIZE);
+            return 0;
+        }
+        if (page[i].key > key) {
+            idx = i-1;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        for (int last_rec_idx = RECORDS_PER_PAGE-1; last_rec_idx >= 0; last_rec_idx--) {
+            if (page[last_rec_idx].key != 0) {
+                idx = last_rec_idx;
+                break;
+            }
+        }
+    }
+
+
+    uint32_t overflow_ptr = page[idx].overflow_pointer;
+    while (overflow_ptr != OVERFLOW_PTR_NULL) {
+        struct record tmp = {};
+        read_record_overflow_area(file, overflow_ptr, &tmp);
+        if (tmp.key == key) {
+            memcpy(r, &tmp, RECORD_SIZE);
+            return 0;
+        }
+        if (tmp.key > key) {
+            return -1;
+        }
+        overflow_ptr = tmp.overflow_pointer;
+    }
+
+    return -1;
+
 }
