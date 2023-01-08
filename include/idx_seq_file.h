@@ -5,10 +5,9 @@
 #include <record.h>
 
 #define ALPHA 0.5
+#define BETA 0.2
 #define RECORDS_PER_PAGE 4 
 #define PAGESIZE (RECORDS_PER_PAGE * RECORD_SIZE)
-#define MAX_PRIMARY_AREA_SIZE 10
-#define MAX_OVERFLOW_AREA_SIZE (MAX_PRIMARY_AREA_SIZE / 5)
 
 struct idx_seq_file {
     const char *index_file_path;
@@ -16,6 +15,8 @@ struct idx_seq_file {
     uint32_t primary_area_size;
     uint32_t overflow_area_size;
 };
+
+void reorganize(struct idx_seq_file *file);
 
 /**
  * Initializes indexed sequential file struct
@@ -57,8 +58,6 @@ void print_data_file(struct idx_seq_file *file);
 int delete_record(struct idx_seq_file *file, int32_t key);
 
 int update_record(struct idx_seq_file *file, int32_t key, struct record *r);
-
-void print_data_file(struct idx_seq_file *file);
 
 void print_index_file(struct idx_seq_file *file); */
 
