@@ -5,8 +5,6 @@
 #include <record.h>
 #include <idx_seq_file.h>
 
-#define NUM_REC 7
-
 void print_menu(void) {
 	printf("1.\tAdd record\n");
 	printf("2.\tAdd record (zeroed)\n");

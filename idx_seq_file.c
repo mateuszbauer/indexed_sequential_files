@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int number_of_disk_operations = 0;
+
 //#define LOG_ENTRY(msg) (printf("%s:%d\t%s\n", __FILE__, __LINE__, msg));
 #define LOG_ENTRY(msg)
 
@@ -64,6 +66,7 @@ static uint16_t get_page_number_from_index_file(struct idx_seq_file *file, int32
     // set position at 0
     fseek(fp, 0, SEEK_SET);
     fread(buffer, sizeof(struct index_entry), number_of_entries, fp);
+    number_of_disk_operations++;
 
     fclose(fp);
 
@@ -100,6 +103,8 @@ static void read_page_from_data_file(struct idx_seq_file *file, struct record *p
     size_t read = fread(page, RECORD_SIZE, RECORDS_PER_PAGE, fp);
     assert(read == RECORDS_PER_PAGE);
 
+    number_of_disk_operations++;
+
     fflush(fp);
     fclose(fp);
 }
@@ -117,6 +122,8 @@ static void save_page_to_data_file(struct idx_seq_file *file, struct record *pag
     assert(ftell(fp) < file->primary_area_size);
     size_t written = fwrite(page, RECORD_SIZE, RECORDS_PER_PAGE, fp);
     assert(written == RECORDS_PER_PAGE);
+
+    number_of_disk_operations += 1;
 
     fflush(fp);
     fclose(fp);
@@ -147,6 +154,7 @@ static void read_record_overflow_area(struct idx_seq_file *file, uint32_t ovf_pt
 
     size_t read = fread(buff, RECORD_SIZE, 1, fp);
     assert(read == 1);
+    number_of_disk_operations++;
 
     fflush(fp);
     fclose(fp);
@@ -166,6 +174,7 @@ static void save_record_overflow_area(struct idx_seq_file *file, uint32_t ovf_pt
 
     size_t written = fwrite(r, RECORD_SIZE, 1, fp);
     assert(written == 1);
+    number_of_disk_operations++;
 
     fflush(fp);
     fclose(fp);
@@ -277,6 +286,7 @@ int add_record(struct idx_seq_file *file, struct record *r)
         return -EINVAL;
     }
 
+    number_of_disk_operations = 0;
 
     uint16_t page_number = get_page_number_from_index_file(file, r->key);
     if (page_number == 0) {
@@ -333,7 +343,6 @@ int add_record(struct idx_seq_file *file, struct record *r)
             save_page_to_data_file(file, page, page_number);
         }
     }
-	print_data_file(file);
 
     double a = (double)file->overflow_area_size;
     double b = (double)file->primary_area_size;
@@ -342,7 +351,7 @@ int add_record(struct idx_seq_file *file, struct record *r)
         reorganize(file);
     }
 
-    return 0;
+    return number_of_disk_operations;
 }
 
 static int add_first_record(struct idx_seq_file *file, struct record *r)
@@ -370,6 +379,7 @@ static int add_first_record(struct idx_seq_file *file, struct record *r)
 
     size_t written = fwrite(page, RECORD_SIZE, RECORDS_PER_PAGE, data_file);
     assert(written == RECORDS_PER_PAGE);
+    number_of_disk_operations += 1;
 
     struct index_entry idx_ent = {
         .key = 1,
@@ -377,6 +387,7 @@ static int add_first_record(struct idx_seq_file *file, struct record *r)
     };
 
     written = fwrite(&idx_ent, sizeof(struct index_entry), 1, index_file);
+    number_of_disk_operations += 1;
     assert(written == 1);
 
     fclose(index_file);
@@ -477,6 +488,7 @@ void print_data_file(struct idx_seq_file *file)
             ovf_info = true;
         }
     }
+    number_of_disk_operations += records_read;
 
     fclose(fp);
 }
@@ -664,19 +676,11 @@ int update_record(struct idx_seq_file *file, struct record *r)
         return -EINVAL;
     }
 
-    int rc = delete_record(file, r->key);
-    if (rc) {
-        fprintf(stderr, "Deleting record failed\n");
-        return rc;
-    }
+    int ret = delete_record(file, r->key);
 
-    rc = add_record(file, r);
-    if (rc) {
-        fprintf(stderr, "Adding record failed\n");
-        return rc;
-    }
+    ret += add_record(file, r);
 
-    return 0;
+    return ret;
 }
 
 int delete_record(struct idx_seq_file *file, int32_t key)
@@ -690,6 +694,8 @@ int delete_record(struct idx_seq_file *file, int32_t key)
         fprintf(stderr, "Invalid key\n");
         return -EINVAL;
     }
+
+    number_of_disk_operations = 0;
 
     uint16_t page_number = get_page_number_from_index_file(file, key);
     struct record page[RECORDS_PER_PAGE] = {};
@@ -733,9 +739,11 @@ int delete_record(struct idx_seq_file *file, int32_t key)
                 fopen(file->index_file_path, "ab");
                 fseek(fp, (read-1)*(sizeof(struct index_entry)), SEEK_SET);
                 fwrite(&tmp, sizeof(struct index_entry), 1, fp);
+                number_of_disk_operations++;
                 break;
             }
         }
+        number_of_disk_operations += read;
     }
 
     // if the record is in the main area we gotta move records[idx+1:last]
@@ -750,7 +758,7 @@ int delete_record(struct idx_seq_file *file, int32_t key)
 
             save_record_overflow_area(file, ovf_ptr, &tmp);
             save_page_to_data_file(file, page, page_number);
-            return 0;
+            return number_of_disk_operations;
         }
 
         if (idx == RECORDS_PER_PAGE-1) { // last 
@@ -763,7 +771,7 @@ int delete_record(struct idx_seq_file *file, int32_t key)
         }
 
         save_page_to_data_file(file, page, page_number);
-        return 0;
+        return number_of_disk_operations;
     }
 
     // record is in the overflow area
@@ -805,8 +813,7 @@ int delete_record(struct idx_seq_file *file, int32_t key)
         save_record_overflow_area(file, curr_ovf_ptr, &current);
     }
 
-    return 0;
-
+    return number_of_disk_operations;
 }
 
 void reorganize_save_page(const char *data_tmp_path, const char *index_tmp_path, struct record *page, uint16_t page_no)
@@ -829,6 +836,8 @@ void reorganize_save_page(const char *data_tmp_path, const char *index_tmp_path,
 
     fwrite(page, RECORD_SIZE, RECORDS_PER_PAGE, data);
     fwrite(&idx_entry, sizeof(struct index_entry), 1, index);
+
+    number_of_disk_operations += 2;
 
     fclose(index);
     fclose(data);
