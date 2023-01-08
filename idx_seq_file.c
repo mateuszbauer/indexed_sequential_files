@@ -646,11 +646,34 @@ static int32_t get_next_record(struct idx_seq_file *file, int32_t key, struct re
                 }
             }            
 
+
             if (page_number + 1 > get_number_of_pages(file)) {
                 return 0;
             }
             return get_next_record_page(file, page_number+1, next, 0);
         }
+    }
+
+    return 0;
+}
+
+int update_record(struct idx_seq_file *file, struct record *r)
+{
+    if (file == NULL) {
+        fprintf(stderr, "File is NULL\n");
+        return -EINVAL;
+    }
+
+    int rc = delete_record(file, r->key);
+    if (rc) {
+        fprintf(stderr, "Deleting record failed\n");
+        return rc;
+    }
+
+    rc = add_record(file, r);
+    if (rc) {
+        fprintf(stderr, "Adding record failed\n");
+        return rc;
     }
 
     return 0;

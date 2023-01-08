@@ -20,6 +20,8 @@ void reorganize(struct idx_seq_file *file);
 
 int delete_record(struct idx_seq_file *file, int32_t key);
 
+int update_record(struct idx_seq_file *file, struct record *r);
+
 /**
  * Initializes indexed sequential file struct
  * 
@@ -55,12 +57,5 @@ int add_record(struct idx_seq_file *file, struct record *r);
 int get_record(struct idx_seq_file *file, int32_t key, struct record *r);
 
 void print_data_file(struct idx_seq_file *file);
-
-/*
-int delete_record(struct idx_seq_file *file, int32_t key);
-
-int update_record(struct idx_seq_file *file, int32_t key, struct record *r);
-
-void print_index_file(struct idx_seq_file *file); */
 
 #endif // _INDEXED_SEQUENTIAL_FILE_H_
