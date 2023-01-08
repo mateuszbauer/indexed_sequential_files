@@ -6,7 +6,7 @@
 
 #define ALPHA 0.5
 #define BETA 0.2
-#define RECORDS_PER_PAGE 4 
+#define RECORDS_PER_PAGE 4
 #define PAGESIZE (RECORDS_PER_PAGE * RECORD_SIZE)
 
 struct idx_seq_file {
@@ -17,6 +17,8 @@ struct idx_seq_file {
 };
 
 void reorganize(struct idx_seq_file *file);
+
+int delete_record(struct idx_seq_file *file, int32_t key);
 
 /**
  * Initializes indexed sequential file struct

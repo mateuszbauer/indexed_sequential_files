@@ -277,13 +277,6 @@ int add_record(struct idx_seq_file *file, struct record *r)
         return -EINVAL;
     }
 
-    double a = (double)file->overflow_area_size;
-    double b = (double)file->primary_area_size;
-    double overflow_ratio = a / (a+b);
-    if (overflow_ratio > BETA) {
-        reorganize(file);
-    }
-
 
     uint16_t page_number = get_page_number_from_index_file(file, r->key);
     if (page_number == 0) {
@@ -328,14 +321,25 @@ int add_record(struct idx_seq_file *file, struct record *r)
         save_page_to_data_file(file, page, page_number);
 
     } else { 
+        size_t i = 0;
         if (found == false) {
-            idx = last_rec_idx;
+            i = last_rec_idx;
+        } else {
+            i = idx-1;
         }
-        bool ret = add_record_overflow_area(file, r, page[idx].overflow_pointer);
+        bool ret = add_record_overflow_area(file, r, page[i].overflow_pointer);
         if (ret) {
-            page[idx].overflow_pointer = file->overflow_area_size + file->primary_area_size - RECORD_SIZE;
+            page[i].overflow_pointer = file->overflow_area_size + file->primary_area_size - RECORD_SIZE;
             save_page_to_data_file(file, page, page_number);
         }
+    }
+	print_data_file(file);
+
+    double a = (double)file->overflow_area_size;
+    double b = (double)file->primary_area_size;
+    double overflow_ratio = a / (a+b);
+    if (overflow_ratio > BETA) {
+        reorganize(file);
     }
 
     return 0;
@@ -633,6 +637,15 @@ static int32_t get_next_record(struct idx_seq_file *file, int32_t key, struct re
             read_record_overflow_area(file, current.overflow_pointer, next);
             return next->key;
         } else { // next is on the next page (if the page exists) // TODO: jak zero to nie dziala
+            // two cases
+            // 1. next is on the 
+            for (size_t i = 0; i < RECORDS_PER_PAGE; i++) {
+                if (page[i].key > current.key) {
+                    memcpy(next, &page[i], RECORD_SIZE);
+                    return next->key;
+                }
+            }            
+
             if (page_number + 1 > get_number_of_pages(file)) {
                 return 0;
             }
@@ -641,6 +654,136 @@ static int32_t get_next_record(struct idx_seq_file *file, int32_t key, struct re
     }
 
     return 0;
+}
+
+int delete_record(struct idx_seq_file *file, int32_t key)
+{
+    if (file == NULL) {
+        fprintf(stderr, "File is NULL\n");
+        return -EINVAL;
+    }
+
+    if (key <= 1) {
+        fprintf(stderr, "Invalid key\n");
+        return -EINVAL;
+    }
+
+    uint16_t page_number = get_page_number_from_index_file(file, key);
+    struct record page[RECORDS_PER_PAGE] = {};
+    read_page_from_data_file(file, page, page_number);
+
+    size_t idx = 0;
+    bool found_in_main_area = false;
+
+    // find record
+    for (size_t i = 0; i < RECORDS_PER_PAGE; i++) {
+        if (page[i].key == key) {
+            idx = i;
+            found_in_main_area = true;
+            break;
+        }
+        else if (page[i].key > key) {
+            idx = i - 1;
+            break;
+        }
+    }
+
+    // first record on page
+    if (found_in_main_area && idx == 0) {
+        FILE *fp = fopen(file->index_file_path, "rb");
+        struct index_entry tmp = {};
+        size_t read = 0;
+        size_t rc = 0;
+        while ((rc = fread(&tmp, sizeof(struct index_entry), 1, fp)) > 0) {
+            read += rc;
+            if (tmp.key == key) {
+
+                if (page[idx].overflow_pointer != OVERFLOW_PTR_NULL) {
+                    struct record r = {};
+                    read_record_overflow_area(file, page[idx].overflow_pointer, &r);
+                    tmp.key = r.key;
+                } else {
+                    tmp.key = page[idx+1].key;
+                }
+
+                fclose(fp);
+                fopen(file->index_file_path, "ab");
+                fseek(fp, (read-1)*(sizeof(struct index_entry)), SEEK_SET);
+                fwrite(&tmp, sizeof(struct index_entry), 1, fp);
+                break;
+            }
+        }
+    }
+
+    // if the record is in the main area we gotta move records[idx+1:last]
+    if (found_in_main_area) {
+        if (page[idx].overflow_pointer != OVERFLOW_PTR_NULL) { // simply replace
+            uint32_t ovf_ptr = page[idx].overflow_pointer;
+            struct record tmp;
+            read_record_overflow_area(file, ovf_ptr, &tmp);
+
+            memcpy(&page[idx], &tmp, RECORD_SIZE);
+            memset(&tmp, 0x0, RECORD_SIZE);
+
+            save_record_overflow_area(file, ovf_ptr, &tmp);
+            save_page_to_data_file(file, page, page_number);
+            return 0;
+        }
+
+        if (idx == RECORDS_PER_PAGE-1) { // last 
+            memset(&page[idx], 0x0, RECORD_SIZE);
+        } else {
+            for (size_t i = idx; i+1 < RECORDS_PER_PAGE; i++) {
+                memcpy(&page[i], &page[i+1], RECORD_SIZE);
+            }
+            memset(&page[RECORDS_PER_PAGE-1], 0x0, RECORD_SIZE);
+        }
+
+        save_page_to_data_file(file, page, page_number);
+        return 0;
+    }
+
+    // record is in the overflow area
+    struct record prev = {};
+    struct record current = {};
+    memcpy(&prev, &page[idx], RECORD_SIZE);
+    uint32_t ovf_ptr = prev.overflow_pointer;
+
+    read_record_overflow_area(file, ovf_ptr, &current);
+
+    if (current.key == key) { // prev is on page in the main area, current in ovf
+        // delete from overflow
+        struct record tmp = {};
+        read_record_overflow_area(file, ovf_ptr, &tmp);
+        memset(&tmp, 0x0, RECORD_SIZE);
+        save_record_overflow_area(file, ovf_ptr, &tmp);
+
+        // update pointer
+        page[idx].overflow_pointer = current.overflow_pointer;
+        save_page_to_data_file(file, page, page_number);
+
+    } else {
+        uint32_t prev_ovf_ptr;
+        while (true) {
+            prev_ovf_ptr = prev.overflow_pointer;
+            memcpy(&prev, &current, RECORD_SIZE);
+            read_record_overflow_area(file, current.overflow_pointer, &current);
+            if (current.key == key) {
+                break;
+            }
+            assert(current.overflow_pointer != OVERFLOW_PTR_NULL);
+        }
+
+        uint32_t curr_ovf_ptr = prev.overflow_pointer;
+        prev.overflow_pointer = current.overflow_pointer;
+        save_record_overflow_area(file, prev_ovf_ptr, &prev);
+
+        memset(&current, 0x0, RECORD_SIZE);
+        save_record_overflow_area(file, curr_ovf_ptr, &current);
+    }
+
+    return 0;
+
 }
 
 void reorganize_save_page(const char *data_tmp_path, const char *index_tmp_path, struct record *page, uint16_t page_no)
