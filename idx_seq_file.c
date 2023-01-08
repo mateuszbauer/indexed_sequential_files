@@ -444,8 +444,20 @@ void print_data_file(struct idx_seq_file *file)
     }
 
     bool ovf_info = false;
+    uint16_t page_no = 1;
+    size_t records_read = 0;
+    size_t rc = 0;
+
     printf("\n*** MAIN AREA ***\n");
-    while (fread(&rec, RECORD_SIZE, 1, fp) > 0) {
+
+    while ((rc = fread(&rec, RECORD_SIZE, 1, fp)) > 0) {
+        records_read += rc;
+        if (ovf_info == false && (records_read-1) % RECORDS_PER_PAGE == 0) {
+            printf("Page: %hu\n", page_no);
+            page_no++;
+        }
+
+
         printf("%d   |", rec.key);
         for (size_t i = 0; i < RECORD_LEN; i++) {
             printf("%hu ", rec.numbers[i]);
